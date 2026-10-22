@@ -10,18 +10,23 @@ const MASK = '[REDACTED]'
 const WORDS = new Set([
   'password', 'passwd', 'pwd', 'pass', 'passphrase', 'secret', 'token', 'otp', 'pin', 'cvv', 'cvc',
   'ssn', 'cookie', 'authorization', 'auth', 'signature', 'sig', 'credential', 'credentials', 'bvn', 'nin',
+  // where someone is: user_lat, userLng, pickup_latitude... (analytics never keep locations)
+  'lat', 'lng', 'lon', 'latitude', 'longitude', 'coords', 'coordinates', 'geolocation', 'gps',
 ])
 // ...or when its words run together into one of these ("x-api-key" -> xapikey).
 const JOINED = [
   'apikey', 'accesskey', 'privatekey', 'secretkey', 'cardnumber', 'clientsecret', 'sessionid',
   'authtoken', 'accesstoken', 'refreshtoken', 'idtoken', 'csrftoken', 'xsrf', 'setcookie',
+  'latlng', 'latlon', 'lnglat', 'lonlat', 'geopoint',
 ]
 // Query parameters that carry credentials in URLs (e.g. Google's ?key=).
-const URL_EXTRA = new Set(['key', 'code', 'access_token', 'id_token'])
+const URL_EXTRA = new Set(['key', 'code', 'access_token', 'id_token', 'll', 'location']) // ?ll=6.52,3.37 (maps)
 
 const SPLIT = /[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])/
 const JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g
 const BEARER = /\b(bearer|basic|token)\s+[A-Za-z0-9\-._~+/]{12,}=*/gi
+// A latitude,longitude pair anywhere, e.g. in a path: /nearby/6.524379,3.379206
+const COORDS = /(?<![\d.])-?\d{1,3}\.\d{4,}\s*(?:,|%2C)\s*-?\d{1,3}\.\d{4,}(?![\d.])/gi
 const URLISH = /^https?:\/\//i
 
 function isSensitive(key) {
@@ -34,7 +39,7 @@ function isSensitive(key) {
 
 function redactString(s) {
   if (typeof s !== 'string') return s
-  return s.replace(JWT, '[REDACTED_JWT]').replace(BEARER, (_m, kind) => `${kind} ${MASK}`)
+  return s.replace(JWT, '[REDACTED_JWT]').replace(COORDS, '[REDACTED_LOCATION]').replace(BEARER, (_m, kind) => `${kind} ${MASK}`)
 }
 
 function redactUrl(url) {

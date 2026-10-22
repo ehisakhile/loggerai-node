@@ -194,6 +194,15 @@ test('redaction', () => {
   assert.equal(redact('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'), '[REDACTED_JWT]')
 })
 
+test('locations are never kept', () => {
+  const u = redactUrl('https://api.hospify.com/hcp/nearby-hcps?user_lat=6.524379&user_lon=3.379206&radius=5')
+  assert.ok(!u.includes('6.524379') && !u.includes('3.379206') && u.includes('radius=5'), u)
+  assert.deepEqual(redact({ latitude: 6.5, userLng: 3.3, pickup_latitude: 1, plate: 'kept' }),
+    { latitude: '[REDACTED]', userLng: '[REDACTED]', pickup_latitude: '[REDACTED]', plate: 'kept' })
+  assert.equal(redact('/nearby/6.524379,3.379206'), '/nearby/[REDACTED_LOCATION]')
+  assert.equal(redact('v1.2,3.4 and 2.0.1'), 'v1.2,3.4 and 2.0.1')
+})
+
 test('frames from ESM file URLs and webpack', () => {
   const err = new Error('x')
   err.stack = 'Error: x\n    at OrderService.place (file:///srv/app/src/orders.mjs:12:5)\n    at async Promise.all (index 0)\n    at handler (/srv/app/node_modules/express/lib/router.js:1:1)\n    at node:internal/process/task_queues:95:5'
