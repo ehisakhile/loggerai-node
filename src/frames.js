@@ -2,10 +2,10 @@
 // Stack frames for an error, innermost first, with the app's own code marked
 // (in_app) so LoggerAI groups errors by where they happened in your code.
 
-const path = require('node:path')
-const { fileURLToPath } = require('node:url')
-
-const OWN = __dirname
+// No Node modules here: the Edge runtime uses this file too.
+const OWN = typeof __dirname === 'string' ? __dirname : '\u0000'
+const isAbsolute = (f) => f.startsWith('/') || /^[A-Za-z]:[\\/]/.test(f)
+const sep = (root) => (root.includes('\\') && !root.includes('/') ? '\\' : '/')
 const LINE = /^\s*at (?:async )?(?:(.*?) \()?(.+?):(\d+):(\d+)\)?$/
 
 function inApp(file) {
@@ -22,12 +22,12 @@ function frames(err, root, limit = 50) {
     let [, fn, file, lineNo] = m
     if (file.startsWith('file://')) {
       try {
-        file = fileURLToPath(file)
+        file = decodeURIComponent(new URL(file).pathname).replace(/^\/([A-Za-z]:)/, '$1')
       } catch {}
     }
     file = file.replace(/^webpack-internal:\/\/\/(\([^)]*\)\/)?/, '').replace(/^\.\//, '')
-    const abs = path.isAbsolute(file)
-    const rel = abs && root && file.startsWith(root + path.sep) ? path.relative(root, file) : file
+    const abs = isAbsolute(file)
+    const rel = abs && root && file.startsWith(root + sep(root)) ? file.slice(root.length + 1) : file
     let cls = null
     let func = fn || '<anonymous>'
     const dot = func.lastIndexOf('.')

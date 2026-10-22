@@ -27,6 +27,9 @@ function init(options = {}) {
     if (options.quiet !== true) process.stderr.write(`LoggerAI: sending as ${client.service} (${client.environment}) to ${client.endpoint}\n`)
     instrument.all(client)
     client.start()
+    // Next.js runs Edge code inside this server when self-hosted: this tells the edge side
+    // the Node side already records those requests, so they aren't counted twice.
+    process.env.LOGGERAI_NODE_SERVER = '1'
     // Send what's left when the process is asked to stop (deploys, Ctrl-C, containers).
     if (!init.hooked) {
       init.hooked = true
@@ -181,7 +184,7 @@ fastify[Symbol.for('fastify.display-name')] = 'loggerai'
  */
 function nextOnRequestError(err, request, context) {
   if (!client) return
-  const route = context && context.routePath ? context.routePath : null
+  const route = nextRoute(context && context.routePath)
   const unit = ctx.current()
   if (unit && route) unit.route = route
   client.exception(err, {
@@ -191,6 +194,13 @@ function nextOnRequestError(err, request, context) {
     extra: context ? { router: context.routerKind, type: context.routeType, source: context.renderSource } : null,
   })
   if (client.serverless) client.flushSoon()
+}
+
+/** Next's routePath ends in the file: /api/orders/[id]/route -> /api/orders/[id]. */
+function nextRoute(p) {
+  if (!p) return null
+  const r = String(p).replace(/\/(route|page)$/, '')
+  return r || '/'
 }
 
 /** Next.js route handlers: names the request by its file route (/api/orders/[id]) and
@@ -208,6 +218,19 @@ function withLoggerAI(handler, route) {
       return await handler(req, context)
     } catch (e) {
       if (client) client.exception(e, { status: 500, route: name })
+      throw e
+    }
+  }
+}
+
+/** Next.js middleware on the Node runtime: reports errors it throws (the page or
+ * route it leads to is timed on its own). */
+function withLoggerAIMiddleware(middleware) {
+  return async function (req, event) {
+    try {
+      return await middleware(req, event)
+    } catch (e) {
+      if (client) client.exception(e, { status: 500, route: 'middleware', method: req && req.method })
       throw e
     }
   }
@@ -253,5 +276,6 @@ module.exports = {
   fastify,
   nextOnRequestError,
   withLoggerAI,
+  withLoggerAIMiddleware,
   VERSION,
 }

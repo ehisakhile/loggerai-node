@@ -1,27 +1,49 @@
 {
   "name": "@loggerai/node",
   "version": "0.1.0",
-  "description": "LoggerAI for Node.js: performance monitoring, errors, logs, health checks and server metrics for Express, Fastify, NestJS and Next.js.",
+  "description": "LoggerAI for Node.js and the edge: performance monitoring, errors, logs, health checks and server metrics for Express, Fastify, NestJS and Next.js (Node and Edge).",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
+      "edge-light": "./src/edge.js",
+      "workerd": "./src/edge.js",
+      "worker": "./src/edge.js",
       "default": "./src/index.js"
+    },
+    "./edge": {
+      "types": "./src/edge.d.ts",
+      "default": "./src/edge.js"
     },
     "./package.json": "./package.json"
   },
   "bin": {
     "loggerai": "bin/loggerai.js"
   },
-  "files": ["src", "bin", "README.md", "LICENSE"],
+  "files": [
+    "src",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.17"
   },
   "scripts": {
     "test": "node --test test/*.test.js"
   },
-  "keywords": ["monitoring", "apm", "observability", "express", "fastify", "nextjs", "nestjs", "errors", "logging"],
+  "keywords": [
+    "monitoring",
+    "apm",
+    "observability",
+    "express",
+    "fastify",
+    "nextjs",
+    "nestjs",
+    "errors",
+    "logging"
+  ],
   "homepage": "https://loggerai.uk",
   "repository": {
     "type": "git",

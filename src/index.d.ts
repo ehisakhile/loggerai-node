@@ -70,3 +70,5 @@ export declare function fastify(app: any, opts: any, done: (err?: Error) => void
 export declare function nextOnRequestError(err: unknown, request: { path: string; method: string; headers: Record<string, string | string[] | undefined> }, context: { routerKind?: string; routePath?: string; routeType?: string; renderSource?: string }): void
 /** Next.js route handlers: names the request by its file route and reports errors. */
 export declare function withLoggerAI<H extends (req: Request, context: any) => any>(handler: H, route?: string): H
+/** Next.js middleware: reports errors it throws. */
+export declare function withLoggerAIMiddleware<M extends (req: Request, event?: any) => any>(middleware: M): M

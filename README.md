@@ -74,7 +74,7 @@ const app = Fastify()
 await app.register(loggerai.fastify)
 ```
 
-### Next.js (App Router or Pages, Node runtime)
+### Next.js (App Router or Pages, Node and Edge runtimes)
 
 ```ts
 // instrumentation.ts (next to app/ or in src/)
@@ -86,10 +86,8 @@ export async function register() {
 }
 
 export async function onRequestError(...args: any[]) {
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { nextOnRequestError } = await import('@loggerai/node')
-    nextOnRequestError(...(args as Parameters<typeof nextOnRequestError>))
-  }
+  const { nextOnRequestError } = await import('@loggerai/node')   // the edge build at the edge
+  nextOnRequestError(...(args as Parameters<typeof nextOnRequestError>))
 }
 ```
 
@@ -100,7 +98,30 @@ module.exports = { serverExternalPackages: ['@loggerai/node'] }
 
 Pages and route handlers are named by their file route (`/products/[slug]`,
 `/api/orders/[id]`). On Vercel, each request's data is sent before the
-function goes to sleep. The Edge runtime isn't supported yet.
+function goes to sleep.
+
+**Edge runtime** (`export const runtime = 'edge'`, and middleware): the same
+import resolves to a small edge build. Wrap edge route handlers and middleware
+so they're timed and their errors reported; each request's data is sent with
+`waitUntil` when it ends:
+
+```ts
+// app/api/price/[sku]/route.ts
+import { withLoggerAI } from '@loggerai/node'
+export const runtime = 'edge'
+export const GET = withLoggerAI(async (req, { params }) => Response.json(await price((await params).sku)))
+
+// middleware.ts
+import { withLoggerAIMiddleware } from '@loggerai/node'
+export const middleware = withLoggerAIMiddleware(async (req) => NextResponse.next())
+```
+
+Self-hosted (`next start`), Next runs edge code inside the Node server, which
+already records it: the edge side then stands aside, so nothing is counted
+twice. The edge build also works in Vercel Edge Functions and Cloudflare
+Workers (`import { withLoggerAI } from '@loggerai/node/edge'`), using the
+`LOGGERAI_KEY` from the environment or `init({ key })`. Server metrics and
+health checks are Node-only.
 
 ### Anything else on Node's http server (Koa, Hapi, plain `http`)
 
