@@ -182,6 +182,43 @@ Every option can be passed to `init({...})`; the main ones also read the environ
   memory. A refused key (401) stops sending until the app restarts.
 - On `SIGTERM` (deploys, containers stopping) it sends what's left first.
 
+## Circuit breakers (opt in)
+
+Register the exact dependency name, calling service, and environment used by
+the policy in Reliability Lab. Only explicitly wrapped calls are protected.
+
+```js
+const { CircuitRegistry } = require('@loggerai/node')
+const registry = new CircuitRegistry({
+  key: process.env.LOGGERAI_KEY,
+  service: 'checkout',
+  environment: 'staging',
+})
+const payments = registry.breaker('payments', { minimumRequests: 10, failureRatio: .5 })
+const stop = registry.start(error => console.warn(error.message))
+
+async function getPayment() {
+  return payments.call(
+    () => fetch('https://payments.example/status', { signal: AbortSignal.timeout(3000) }),
+    response => response.status < 500,
+  )
+}
+
+// At application shutdown: stop()
+```
+
+Handle `CircuitOpenError` and `CircuitCapacityError` in your application's
+response path. Exceptions and results rejected by the success predicate count
+as failures. The wrapper returns the original result and does not retry or add
+a fallback. Always set deadlines on the underlying operation.
+
+The registry synchronizes immediately and every 30 seconds. Calls use local
+state and retain the last configuration when synchronization fails. Runtime
+acknowledgements describe observed processes, not proof that every instance is
+instrumented. Create one registry per process and stop it on shutdown.
+Automatic instrumentation is independent. These wrappers use the Node entry
+point; they are not available in the edge entry point.
+
 ## Development
 
 ```bash

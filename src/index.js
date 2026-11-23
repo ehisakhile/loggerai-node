@@ -262,6 +262,8 @@ async function routeFromParams(req, context) {
 }
 
 module.exports = {
+  ...require('./circuit'),
+  ...require('./circuit-registry'),
   init,
   getClient,
   captureException,

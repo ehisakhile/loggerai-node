@@ -39,6 +39,40 @@ export interface Options {
   quiet?: boolean
 }
 
+export interface CircuitOptions {
+  minimumRequests?: number
+  failureRatio?: number
+  windowSeconds?: number
+  cooldownSeconds?: number
+  maxConcurrent?: number
+  /** Monotonic milliseconds; normally performance.now(). */
+  clock?: () => number
+}
+export interface CircuitSnapshot {
+  target: string
+  state: 'closed' | 'open' | 'half_open'
+  calls: number
+  failures: number
+  blocked: number
+  capacity_blocked: number
+  inflight: number
+}
+export class CircuitOpenError extends Error { target: string }
+export class CircuitCapacityError extends Error { target: string }
+export class CircuitBreaker {
+  constructor(target: string, options?: CircuitOptions)
+  configure(options: CircuitOptions): void
+  call<T>(fn: () => T | Promise<T>, isSuccess?: (result: T) => boolean): Promise<T>
+  snapshot(): CircuitSnapshot
+}
+export class CircuitRegistry {
+  constructor(options: { key: string; service?: string; environment?: string; endpoint?: string; instanceId?: string })
+  breaker(target: string, options?: CircuitOptions): CircuitBreaker
+  sync(): Promise<number>
+  start(onError?: (error: Error) => void): () => void
+  stop(): void
+}
+
 export interface Client {
   readonly enabled: boolean
   readonly endpoint: string
