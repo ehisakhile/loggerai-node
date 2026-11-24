@@ -93,3 +93,34 @@ test('inside a Node server that already records, it stands aside', async () => {
   delete process.env.LOGGERAI_NODE_SERVER
   assert.equal(all('requests').length, before)
 })
+
+test('microservices: the edge continues the trace and hands it to internal services', async () => {
+  const got = []
+  const svc = http.createServer((req, res) => {
+    got.push(req.headers)
+    res.writeHead(200).end('ok')
+  })
+  const port = await listen(svc)
+  const waits = []
+  const GET = edge.withLoggerAI(async () => {
+    await fetch(`http://127.0.0.1:${port}/inventory`, { headers: { accept: 'application/json' } })
+    await fetch(new Request(`http://localhost:${port}/prices`))
+    return new Response('ok')
+  }, '/api/cart')
+  await GET(new Request('http://x/api/cart', { headers: { traceparent: '00-11111111111111111111111111111111-2222222222222222-01', 'x-loggerai-caller': 'web-bff' } }),
+    { waitUntil: (p) => waits.push(p) })
+  await Promise.all(waits)
+  svc.close()
+  const r = all('requests').find((x) => x.route === '/api/cart')
+  assert.equal(r.trace_id, '11111111111111111111111111111111')
+  assert.equal(r.parent_span_id, '2222222222222222')
+  assert.equal(r.caller, 'web-bff')
+  assert.equal(got.length, 2)
+  for (const h of got) {
+    const [, trace, span] = h.traceparent.split('-')
+    assert.equal(trace, r.trace_id)
+    assert.ok(r.spans.some((s) => s.span_id === span))
+    assert.equal(h['x-loggerai-caller'], 'web')
+  }
+  assert.equal(got[0].accept, 'application/json', 'the call keeps its own headers')
+})

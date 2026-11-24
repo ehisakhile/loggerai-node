@@ -93,11 +93,19 @@ function measure(target, operation, fn) {
 /** Time a unit of work outside a web request: a queue job, a cron task, a script.
  *
  *   await loggerai.track('job', 'SendInvoices', async () => { ... })
+ *
+ * For a message another service published with loggerai.traceHeaders(), pass the message's
+ * headers so the job joins that trace and the service map shows who sent it:
+ *
+ *   await loggerai.track('job', 'order.created', () => handle(msg), { headers: msg.properties.headers })
  */
-function track(kind, name, fn) {
+function track(kind, name, fn, options = {}) {
   if (!client || !client.enabled) return fn()
   const k = ['job', 'command', 'http'].includes(kind) ? kind : 'job'
-  const unit = new ctx.Unit(k, k === 'command' ? 'CLI' : 'JOB')
+  const h = lowerKeys(options && options.headers)
+  const parent = ctx.parentFrom(h.traceparent)
+  const unit = new ctx.Unit(k, k === 'command' ? 'CLI' : 'JOB', parent && parent.traceId, ctx.sessionFrom(h['x-loggerai-session']), parent, h['x-loggerai-caller'])
+  if (unit.caller && k === 'job') unit.transport = 'queue'
   unit.route = String(name).slice(0, 255)
   return ctx.store.run(unit, () => {
     const fail = (e) => {
@@ -115,6 +123,28 @@ function track(kind, name, fn) {
     client.finish(unit, 200)
     return r
   })
+}
+
+/** Headers that carry the current trace to another service: put them on a message you publish
+ * (Kafka, RabbitMQ, SQS, BullMQ...) or a request LoggerAI doesn't see. target names where it goes
+ * (a queue or topic), recorded as a step of the current request.
+ *
+ *   channel.publish('orders', 'order.created', body, { headers: loggerai.traceHeaders('orders') })
+ */
+function traceHeaders(target) {
+  const unit = ctx.current()
+  if (!client || !client.enabled || !unit || unit.finished) return {}
+  const sid = ctx.spanId()
+  if (target) unit.dep(String(target).slice(0, 120), 'PUBLISH', 0, true, { spanId: sid, kind: 'producer', name: `publish ${String(target).slice(0, 100)}` })
+  return ctx.outgoingHeaders(unit, sid, client.service)
+}
+
+function lowerKeys(headers) {
+  const out = {}
+  if (!headers || typeof headers !== 'object') return out
+  const entries = typeof headers.entries === 'function' && !Array.isArray(headers) ? [...headers.entries()] : Object.entries(headers)
+  for (const [k, v] of entries) out[String(k).toLowerCase()] = Buffer.isBuffer(v) ? v.toString() : Array.isArray(v) ? v[0] : v
+  return out
 }
 
 /** Send everything now (at the end of a script or a serverless call). */
@@ -271,6 +301,7 @@ module.exports = {
   setRoute,
   measure,
   track,
+  traceHeaders,
   flush,
   healthChecks,
   log,

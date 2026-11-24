@@ -52,6 +52,9 @@ class Client {
     this.captureConsole = o.captureConsole === undefined ? true : !!o.captureConsole
     this.captureQueries = o.captureQueries === undefined ? true : !!o.captureQueries
     this.captureHttp = o.captureHttp === undefined ? true : !!o.captureHttp
+    // Which outgoing calls carry the trace (traceparent) and this service's name (x-loggerai-caller):
+    // the project's own services. Internal hosts by default; propagate: true, false or a host list.
+    this.propagates = ctx.propagationRule(o.propagate, env('LOGGERAI_PROPAGATE'))
     this.ignorePaths = o.ignorePaths || ['/health', '/healthz', '/up', '/favicon.ico', '/metrics', '/_next/', '/__nextjs', '/robots.txt']
     this.healthChecks = { ...(o.healthChecks || {}) }
     this.healthInterval = (o.healthInterval || 60) * 1000

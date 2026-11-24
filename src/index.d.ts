@@ -23,6 +23,11 @@ export interface Options {
   captureQueries?: boolean
   /** Time outgoing HTTP calls and fetch(). Default true. */
   captureHttp?: boolean
+  /** Which outgoing calls carry the trace (traceparent) and this service's name (x-loggerai-caller).
+   * Default: the project's internal hosts only (names without a dot, private addresses, .internal,
+   * .svc.cluster.local...). true: every call; false: none; or extra hosts ("api.acme.io", "*.acme.io").
+   * Env: LOGGERAI_PROPAGATE=all|none|host,*.domain */
+  propagate?: boolean | string[]
   /** Paths not recorded (prefixes; a trailing slash matches everything under it). */
   ignorePaths?: string[]
   /** Checks run every minute: each returns true/false (or a promise), or [ok, detail]. */
@@ -91,7 +96,10 @@ export declare function captureException(err: unknown, extra?: Record<string, un
 export declare function setUser(id: string | number | null | undefined): void
 export declare function setRoute(template: string): void
 export declare function measure<T>(target: string, operation: string, fn: () => T): T
-export declare function track<T>(kind: 'job' | 'command' | 'http', name: string, fn: () => T): T
+/** headers: a message's headers from traceHeaders(), so the job joins the publisher's trace. */
+export declare function track<T>(kind: 'job' | 'command' | 'http', name: string, fn: () => T, options?: { headers?: Record<string, string | Buffer | string[] | undefined> | Headers }): T
+/** Headers that carry the current trace to another service: put them on a message you publish. */
+export declare function traceHeaders(target?: string): Record<string, string>
 export declare function flush(timeoutMs?: number): Promise<boolean>
 export declare function healthChecks(checks: Record<string, () => unknown>): void
 export declare function log(level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL', message: string, logger?: string): void

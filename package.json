@@ -1,6 +1,6 @@
 {
   "name": "@loggerai/node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "LoggerAI for Node.js and the edge: performance monitoring, errors, logs, health checks and server metrics for Express, Fastify, NestJS and Next.js (Node and Edge).",
   "main": "src/index.js",
   "types": "src/index.d.ts",

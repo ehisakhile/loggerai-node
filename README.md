@@ -129,6 +129,31 @@ health checks are Node-only.
 matched, ids in the path become `{id}` (`/orders/{id}`); name a request
 yourself with `loggerai.setRoute('/orders/:id')`.
 
+## Microservices
+
+Give each service its own name and use the same project key everywhere:
+
+```bash
+LOGGERAI_SERVICE=orders
+```
+
+Calls between services then link up on their own: a request is one trace from
+the first service to the last, and LoggerAI's Service map shows which service
+calls which. Incoming requests continue the trace they're called with
+(`traceparent`), and `http`, `https` and `fetch` calls carry it on, with this
+service's name (`x-loggerai-caller`). Only the project's own services get them: hosts without a dot (Docker and Kubernetes service names), private addresses, and `.internal`, `.local` and `.svc.cluster.local` names. Outside APIs (Stripe, OpenAI) never do. If your services call each other by a public name, list it (`propagate: ['api.acme.io', '*.acme.io']`, or
+`LOGGERAI_PROPAGATE=api.acme.io,*.acme.io`; `all` or `none` also work).
+
+Queues: put the trace on the message, and pass it back when you handle it.
+
+```js
+channel.publish('orders', 'order.created', body, { headers: loggerai.traceHeaders('orders') })
+
+await loggerai.track('job', 'order.created', () => handle(msg), { headers: msg.properties.headers })
+```
+
+The edge build (`@loggerai/node/edge`) does the same for `fetch`.
+
 ## More
 
 ```js

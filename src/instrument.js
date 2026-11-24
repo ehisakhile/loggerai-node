@@ -51,7 +51,9 @@ function server(client) {
         return emit.apply(this, arguments)
       }
       const h = req.headers || {}
-      const unit = new ctx.Unit('http', String(req.method || 'GET').toUpperCase(), ctx.traceFrom(h.traceparent), ctx.sessionFrom(h['x-loggerai-session']))
+      const parent = ctx.parentFrom(h.traceparent)
+      const unit = new ctx.Unit('http', String(req.method || 'GET').toUpperCase(), parent && parent.traceId, ctx.sessionFrom(h['x-loggerai-session']),
+        parent, h['x-loggerai-caller'])
       req.loggeraiUnit = unit
       const finish = () => {
         if (unit.finished) return
@@ -99,14 +101,23 @@ function httpClient(client) {
       if (!unit || unit.finished) return req
       const [target, port] = hostOf(args, mod === https)
       if (client.isSelf(target, port)) return req
+      const sid = ctx.spanId()
+      // The project's own services get the trace and this service's name; outside APIs don't.
+      if (client.propagates(target)) {
+        try {
+          if (!req.headersSent && !req.getHeader('traceparent')) {
+            for (const [k, v] of Object.entries(ctx.outgoingHeaders(unit, sid, client.service))) if (!req.getHeader(k)) req.setHeader(k, v)
+          }
+        } catch {}
+      }
       const start = process.hrtime.bigint()
       let recorded = false
-      const record = (ok) => {
+      const record = (ok, status) => {
         if (recorded) return
         recorded = true
-        ctx.store.run(unit, () => ctx.dependency(target, methodOf(args), ctx.since(start), ok))
+        ctx.store.run(unit, () => ctx.dependency(target, methodOf(args), ctx.since(start), ok, { spanId: sid, kind: 'client', status }))
       }
-      req.once('response', (res) => record(res.statusCode < 500))
+      req.once('response', (res) => record(res.statusCode < 500, res.statusCode))
       req.once('error', () => record(false))
       return req
     }
@@ -123,6 +134,25 @@ function httpClient(client) {
   } catch {}
 }
 
+/** undici keeps a request's headers as a flat array (or, in old versions, one string). */
+function hasHeader(request, name) {
+  const h = request.headers
+  const n = name.toLowerCase()
+  if (Array.isArray(h)) {
+    for (let i = 0; i < h.length; i += 2) if (String(h[i]).toLowerCase() === n) return true
+    return false
+  }
+  return typeof h === 'string' && `\r\n${h.toLowerCase()}`.includes(`\r\n${n}:`)
+}
+
+function addHeader(request, name, value) {
+  try {
+    if (typeof request.addHeader === 'function') request.addHeader(name, value)
+    else if (Array.isArray(request.headers)) request.headers.push(name, value)
+    else if (typeof request.headers === 'string') request.headers += `${name}: ${value}\r\n`
+  } catch {}
+}
+
 /** fetch() is undici inside Node: it reports each request on diagnostics channels. */
 function fetchClient(client) {
   if (!client.captureHttp || !once('fetch')) return
@@ -136,15 +166,19 @@ function fetchClient(client) {
       target = u.hostname
       if (client.isSelf(target, Number(u.port) || (u.protocol === 'https:' ? 443 : 80))) return
     } catch {}
-    pending.set(request, { unit, target, method: String(request.method || 'GET').toUpperCase(), start: process.hrtime.bigint() })
+    const sid = ctx.spanId()
+    if (client.propagates(target) && !hasHeader(request, 'traceparent')) {
+      for (const [k, v] of Object.entries(ctx.outgoingHeaders(unit, sid, client.service))) if (!hasHeader(request, k)) addHeader(request, k, v)
+    }
+    pending.set(request, { unit, target, sid, method: String(request.method || 'GET').toUpperCase(), start: process.hrtime.bigint() })
   })
-  const end = (request, ok) => {
+  const end = (request, ok, status) => {
     const p = request && pending.get(request)
     if (!p) return
     pending.delete(request)
-    p.unit.dep(p.target, p.method, ctx.since(p.start), ok)
+    p.unit.dep(p.target, p.method, ctx.since(p.start), ok, { spanId: p.sid, kind: 'client', status })
   }
-  dc.subscribe('undici:request:headers', ({ request, response }) => end(request, !response || response.statusCode < 500))
+  dc.subscribe('undici:request:headers', ({ request, response }) => end(request, !response || response.statusCode < 500, response && response.statusCode))
   dc.subscribe('undici:request:error', ({ request }) => end(request, false))
 }
 

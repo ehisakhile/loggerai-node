@@ -10,11 +10,14 @@
  */
 
 const { frames, typeName } = require('./frames')
+const { propagationRule } = require('./propagate')
 const { redact, redactString } = require('./redact')
 const { VERSION } = require('./version')
 
 const DEFAULT_ENDPOINT = 'https://loggerapp.ehigiator.com/api/v1/ingest/batch'
-const TRACEPARENT = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/
+const TRACEPARENT = /^[0-9a-f]{2}-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/
+const CALLER = /^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,59}$/
+const MAX_SPANS = 200
 const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,}|[A-Za-z0-9_-]{20,})$/i
 
 const env = (name) => {
@@ -48,6 +51,7 @@ function init(options = {}) {
     host: options.host || env('VERCEL_REGION') || 'edge',
     enabled: !!(on && key && key.startsWith('sk_')),
     captureHttp: options.captureHttp !== false,
+    propagates: propagationRule(options.propagate, env('LOGGERAI_PROPAGATE')),
     lastError: null,
   }
   if (config.enabled && config.captureHttp) patchFetch()
@@ -72,30 +76,55 @@ function hex(bytes) {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+const spanId = () => hex(crypto.getRandomValues(new Uint8Array(8)))
+
 function newUnit(method, headers) {
-  const tp = TRACEPARENT.exec(String((headers && headers.get && headers.get('traceparent')) || '').trim().toLowerCase())
-  const session = String((headers && headers.get && headers.get('x-loggerai-session')) || '').trim()
+  const get = (n) => String((headers && headers.get && headers.get(n)) || '').trim()
+  const tp = TRACEPARENT.exec(get('traceparent').toLowerCase())
+  const valid = tp && tp[1] !== '0'.repeat(32) && tp[2] !== '0'.repeat(16)
+  const session = get('x-loggerai-session')
+  const caller = get('x-loggerai-caller').slice(0, 60)
   return {
     kind: 'http',
     method: String(method || 'GET').toUpperCase(),
     route: null,
-    traceId: tp && tp[1] !== '0'.repeat(32) ? tp[1] : hex(crypto.getRandomValues(new Uint8Array(16))),
+    traceId: valid ? tp[1] : hex(crypto.getRandomValues(new Uint8Array(16))),
+    spanId: spanId(),
+    parentSpanId: valid ? tp[2] : null,
+    caller: caller && CALLER.test(caller) ? caller : null,
     sessionId: session && /^[A-Za-z0-9._:-]+$/.test(session) ? session.slice(0, 64) : null,
     userId: null,
     ts: Date.now() / 1000,
     started: performance.now(),
     deps: new Map(),
+    spans: [],
     finished: false,
   }
 }
 
-function dep(unit, target, op, ms, ok) {
+function dep(unit, target, op, ms, ok, sid, status) {
   const k = `${target}\u0000${op}`
   let d = unit.deps.get(k)
   if (!d) unit.deps.set(k, (d = { target: String(target).slice(0, 120), op: String(op).toUpperCase().slice(0, 20), count: 0, ms: 0, errors: 0 }))
   d.count += 1
   d.ms += ms
   if (!ok) d.errors += 1
+  if (sid && unit.spans.length < MAX_SPANS) {
+    const end = performance.now() - unit.started
+    unit.spans.push({ span_id: sid, name: `${d.op} ${d.target}`, kind: 'client', target: d.target, start_ms: Math.max(0, Math.round((end - ms) * 100) / 100),
+      duration_ms: Math.round(ms * 100) / 100, ok: !!ok, ...(status ? { status } : {}) })
+  }
+}
+
+/** The request's headers plus the trace, for a call to one of the project's own services. */
+function withTrace(unit, input, init, sid) {
+  const base = (init && init.headers) || (input && typeof input === 'object' && !(input instanceof URL) && input.headers) || undefined
+  const headers = new Headers(base)
+  if (headers.has('traceparent')) return null
+  headers.set('traceparent', `00-${unit.traceId}-${sid}-01`)
+  if (config.service) headers.set('x-loggerai-caller', config.service)
+  if (unit.sessionId && !headers.has('x-loggerai-session')) headers.set('x-loggerai-session', unit.sessionId)
+  return { ...(init || {}), headers }
 }
 
 /** fetch() calls made while serving a request are timed, by host. */
@@ -111,13 +140,19 @@ function patchFetch() {
       target = u.hostname
       if (u.href.startsWith(config.endpoint)) return originalFetch(input, init)
     } catch {}
+    const sid = spanId()
+    if (config.propagates(target)) {
+      try {
+        init = withTrace(unit, input, init, sid) || init
+      } catch {}
+    }
     const t = performance.now()
     try {
       const r = await originalFetch(input, init)
-      dep(unit, target, method, performance.now() - t, r.status < 500)
+      dep(unit, target, method, performance.now() - t, r.status < 500, sid, r.status)
       return r
     } catch (e) {
-      dep(unit, target, method, performance.now() - t, false)
+      dep(unit, target, method, performance.now() - t, false, sid)
       throw e
     }
   }
@@ -193,6 +228,10 @@ async function finishUnit(unit, status) {
     status: Number(status) || 0,
     duration_ms: Math.round((performance.now() - unit.started) * 100) / 100,
     trace_id: unit.traceId,
+    span_id: unit.spanId,
+    ...(unit.parentSpanId ? { parent_span_id: unit.parentSpanId } : {}),
+    ...(unit.caller ? { caller: unit.caller } : {}),
+    ...(unit.spans.length ? { spans: unit.spans } : {}),
     session_id: unit.sessionId,
     user: await userRef(unit.userId),
     deps: [...unit.deps.values()].map((d) => ({ ...d, ms: Math.round(d.ms * 100) / 100 })),

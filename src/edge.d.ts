@@ -9,6 +9,8 @@ export interface EdgeOptions {
   enabled?: boolean
   /** Time fetch() calls made while serving a request. Default true. */
   captureHttp?: boolean
+  /** Which fetch() calls carry the trace: internal hosts by default; true, false or extra hosts. */
+  propagate?: boolean | string[]
 }
 export declare const VERSION: string
 export declare function init(options?: EdgeOptions): { enabled: boolean; endpoint: string; service: string; environment: string; release: string | null }

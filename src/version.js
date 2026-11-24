@@ -1,2 +1,2 @@
 'use strict'
-module.exports = { VERSION: '0.1.0' }
+module.exports = { VERSION: '0.2.0' }
